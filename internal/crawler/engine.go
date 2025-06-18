@@ -1,27 +1,19 @@
 package crawler
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
-
 	"crawler-go/internal/frontier"
 	"crawler-go/internal/storage"
-	"golang.org/x/net/html"
 	"github.com/joho/godotenv"
+	"crawler-go/internal/parser"
 )
 
-
-	
-// 	_ = godotenv.Load()
-// access := os.Getenv("MONGODB_URI") != ""
-// fmt.Println("Connecting to DB at:", os.Getenv("MONGODB_URI"))
 
 func Run(opts Options) error{
 	_ = godotenv.Load()
@@ -85,7 +77,7 @@ func Run(opts Options) error{
 					if len(body) == 0 {
 						continue
 					}
-					wp, links := parseHTML(u, body)
+					wp, links := parser.ParseHTML(u, body)
 					store.Insert(wp)
 					for _, l := range links {
 						if !visited.Has(l) {
@@ -119,46 +111,6 @@ func Run(opts Options) error{
 
 
 
-func parseHTML(currURL string, content []byte) (storage.Webpage, []string) {
-	z := html.NewTokenizer(bytes.NewReader(content))
-	tokenCount := 0
-	bodyStarted := false
-	textLen := 0
-	wp := storage.Webpage{URL: currURL}
-	links := make([]string, 0)
-
-	for {
-		if z.Next() == html.ErrorToken || tokenCount > 500 {
-			break
-		}
-		t := z.Token()
-
-		if t.Type == html.StartTagToken {
-			switch t.Data {
-			case "title":
-				z.Next()
-				wp.Title = z.Token().Data
-			case "body":
-				bodyStarted = true
-			case "script", "style":
-				z.Next() // skip contents
-			case "a":
-				if href := absoluteHref(t); href != "" {
-					links = append(links, href)
-				}
-			}
-		}
-
-		if bodyStarted && t.Type == html.TextToken && textLen < 500 {
-			txt := strings.TrimSpace(t.Data)
-			wp.Content += txt
-			textLen += len(txt)
-		}
-		tokenCount++
-	}
-	return wp, links
-}
-
 func fetch(u string) []byte {
 	res, err := http.Get(u)
 	if err != nil {
@@ -170,11 +122,3 @@ func fetch(u string) []byte {
 }
 
 
-func absoluteHref(tok html.Token) string {
-	for _, a := range tok.Attr {
-		if a.Key == "href" && strings.HasPrefix(a.Val, "http") {
-			return a.Val
-		}
-	}
-	return ""
-}
