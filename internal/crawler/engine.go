@@ -12,6 +12,9 @@ import (
 	"crawler-go/internal/storage"
 	"github.com/joho/godotenv"
 	"crawler-go/internal/parser"
+	"net/url"
+	"crawler-go/internal/hostman"
+	
 )
 
 
@@ -38,21 +41,32 @@ func Run(opts Options) error{
 	jobs   := make(chan string, opts.Workers*2)
 	wg     := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
+    hm     := hostman.New(opts.UserAgent, opts.RequestsPerHost, opts.RobotsTimeout)
 
 	// Dispatcher
-	go func() {
+	go func() {               // its own goroutine
 		for {
-			if visited.Size() >= opts.MaxPages {
-				cancel() // broadcast stop
-				close(jobs)
+			if visited.Size() >= opts.MaxPages {   // global stop condition
+				cancel()        // ⬅ broadcasts via ctx
+				close(jobs)     // no more URLs will be sent
 				return
 			}
-			u, ok := queue.Dequeue()
-			if !ok {
+
+			webUrl, ok := queue.Dequeue()
+			if !ok {                      // queue empty? wait a bit
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
-			jobs <- u
+
+			// host politeness gate ↓
+			parsed, _ := url.Parse(webUrl)
+			if allow, wait := hm.Check(parsed); !allow {
+				continue                 // disallowed by robots.txt
+			} else {                     // may be rate-limited
+				wait(ctx)                // blocks for token
+			}
+
+			jobs <- parsed.String()      // ⚙️  conveyor belt send (blocks if full)
 		}
 	}()
 
@@ -109,16 +123,22 @@ func Run(opts Options) error{
 }
 
 
-
+var httpClient = &http.Client{
+    Timeout: 15 * time.Second, // hard deadline for everything (dial + TLS + body)
+    // Optionally add Transport with IdleConnTimeout etc.
+}
 
 func fetch(u string) []byte {
-	res, err := http.Get(u)
-	if err != nil {
-		return nil
-	}
-	defer res.Body.Close()
-	b, _ := io.ReadAll(res.Body)
-	return b
+    resp, err := httpClient.Get(u)
+    if err != nil {
+        return nil
+    }
+    defer resp.Body.Close()
+
+    // cheap safeguard: ignore >1 MB pages
+    const max = 1 << 20
+    b, _ := io.ReadAll(io.LimitReader(resp.Body, max))
+    return b
 }
 
 

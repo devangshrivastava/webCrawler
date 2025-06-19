@@ -2,10 +2,10 @@ package parser
 
 import (
 	"bytes"
-	"strings"
-	"golang.org/x/net/html"
 	"crawler-go/internal/storage"
-	
+	"strings"
+
+	"golang.org/x/net/html"
 )
 
 func ParseHTML(currURL string, content []byte) (storage.Webpage, []string) {
@@ -45,6 +45,15 @@ func ParseHTML(currURL string, content []byte) (storage.Webpage, []string) {
 		}
 		tokenCount++
 	}
+
+	// print links for debugging
+	// if len(links) > 0 {
+	// 	fmt.Printf("Found %d links in %s\n", len(links), currURL)
+	// 	for _, l := range links {
+	// 		fmt.Printf("  - %s\n", l)
+	// 	}
+	// }
+
 	return wp, links
 }
 

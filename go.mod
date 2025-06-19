@@ -4,8 +4,10 @@ go 1.24.2
 
 require (
 	github.com/joho/godotenv v1.5.1
+	github.com/temoto/robotstxt v1.1.2
 	go.mongodb.org/mongo-driver v1.17.4
 	golang.org/x/net v0.21.0
+	golang.org/x/time v0.12.0
 )
 
 require (
