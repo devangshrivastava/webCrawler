@@ -1,26 +1,35 @@
+// internal/crawler/engine.go
 package crawler
 
 import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
 	"crawler-go/internal/frontier"
-	"crawler-go/internal/storage"
-	"github.com/joho/godotenv"
-	"crawler-go/internal/parser"
-	"net/url"
 	"crawler-go/internal/hostman"
-	
+	"crawler-go/internal/parser"
+	"crawler-go/internal/storage"
+
+	"github.com/joho/godotenv"
 )
 
-
-func Run(opts Options) error{
+// -----------------------------------------------------------------------------
+// Public entry-point
+// -----------------------------------------------------------------------------
+func Run(opts Options) error {
 	_ = godotenv.Load()
-	access := os.Getenv(("MONGODB_URI")) != ""
+
+	// ----- MongoDB -----------------------------------------------------------
+	access := os.Getenv("MONGODB_URI") != ""
 	fmt.Println("Connecting to DB at:", os.Getenv("MONGODB_URI"))
 	if !access {
 		fmt.Println("MongoDB access disabled, running in no-op mode")
@@ -30,47 +39,84 @@ func Run(opts Options) error{
 		return fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 	defer store.Close()
-	queue := frontier.NewQueue()
-	visited := frontier.NewVisited()
 
+	// ----- Frontier / visited sets ------------------------------------------
+	queue   := frontier.NewQueue()
+	visited := frontier.NewVisited()
 	for _, s := range opts.Seeds {
 		queue.Enqueue(s)
 	}
 
-	// --- Worker pool ---
-	jobs   := make(chan string, opts.Workers*2)
-	wg     := sync.WaitGroup{}
-	ctx, cancel := context.WithCancel(context.Background())
-    hm     := hostman.New(opts.UserAgent, opts.RequestsPerHost, opts.RobotsTimeout)
+	// ----- Host politeness manager ------------------------------------------
+	hm := hostman.New(opts.UserAgent, opts.RequestsPerHost, opts.RobotsTimeout)
 
-	// Dispatcher
-	go func() {               // its own goroutine
+	// ----- Strategy parsing (bfs | dfs | mixedN) -----------------------------
+	strat   := strings.ToLower(opts.Strategy)
+	mixPct  := 0 // 0 = pure BFS, 100 = pure DFS
+	switch {
+	case strat == "bfs":
+		mixPct = 0
+	case strat == "dfs":
+		mixPct = 100
+	case strings.HasPrefix(strat, "mixed"):
+		if n, err := strconv.Atoi(strat[5:]); err == nil {
+			if n < 0 {
+				n = 0
+			}
+			if n > 100 {
+				n = 100
+			}
+			mixPct = n
+		}
+	default:
+		fmt.Printf("unknown strategy %q, defaulting to bfs\n", strat)
+	}
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	// ----- Worker pool channels ---------------------------------------------
+	jobs := make(chan string, opts.Workers*2)
+	wg   := sync.WaitGroup{}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// ----- Dispatcher --------------------------------------------------------
+	go func() {
 		for {
-			if visited.Size() >= opts.MaxPages {   // global stop condition
-				cancel()        // ⬅ broadcasts via ctx
-				close(jobs)     // no more URLs will be sent
+			// global stop?
+			if visited.Size() >= opts.MaxPages {
+				cancel()
+				close(jobs)
 				return
 			}
 
-			webUrl, ok := queue.Dequeue()
-			if !ok {                      // queue empty? wait a bit
+			// choose front/back according to strategy
+			var webURL string
+			var ok bool
+			if rng.Intn(100) < mixPct {      // DFS sample
+				webURL, ok = queue.PopBack()
+			} else {                         // BFS default
+				webURL, ok = queue.PopFront()
+			}
+			if !ok {                         // frontier empty
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
 
-			// host politeness gate ↓
-			parsed, _ := url.Parse(webUrl)
+			// politeness checks (robots + rate-limit)
+			parsed, err := url.Parse(webURL)
+			if err != nil {
+				continue
+			}
 			if allow, wait := hm.Check(parsed); !allow {
-				continue                 // disallowed by robots.txt
-			} else {                     // may be rate-limited
-				wait(ctx)                // blocks for token
+				continue
+			} else if err := wait(ctx); err != nil {
+				continue
 			}
 
-			jobs <- parsed.String()      // ⚙️  conveyor belt send (blocks if full)
+			jobs <- parsed.String()          // enqueue for workers
 		}
 	}()
 
-	// Workers
+	// ----- Workers -----------------------------------------------------------
 	for i := 0; i < opts.Workers; i++ {
 		wg.Add(1)
 		go func() {
@@ -87,12 +133,15 @@ func Run(opts Options) error{
 						continue
 					}
 					visited.Add(u)
+
 					body := fetch(u)
 					if len(body) == 0 {
 						continue
 					}
+
 					wp, links := parser.ParseHTML(u, body)
 					store.Insert(wp)
+
 					for _, l := range links {
 						if !visited.Has(l) {
 							queue.Enqueue(l)
@@ -103,8 +152,8 @@ func Run(opts Options) error{
 		}()
 	}
 
-	// --- Stats ticker (same as old) ---
-	start := time.Now()
+	// ----- Stats ticker ------------------------------------------------------
+	start  := time.Now()
 	ticker := time.NewTicker(1 * time.Minute)
 	go func() {
 		for t := range ticker.C {
@@ -122,23 +171,21 @@ func Run(opts Options) error{
 	return nil
 }
 
-
+// -----------------------------------------------------------------------------
+// HTTP fetch helper (shared client with timeout)
+// -----------------------------------------------------------------------------
 var httpClient = &http.Client{
-    Timeout: 15 * time.Second, // hard deadline for everything (dial + TLS + body)
-    // Optionally add Transport with IdleConnTimeout etc.
+	Timeout: 15 * time.Second,
 }
 
 func fetch(u string) []byte {
-    resp, err := httpClient.Get(u)
-    if err != nil {
-        return nil
-    }
-    defer resp.Body.Close()
+	resp, err := httpClient.Get(u)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
 
-    // cheap safeguard: ignore >1 MB pages
-    const max = 1 << 20
-    b, _ := io.ReadAll(io.LimitReader(resp.Body, max))
-    return b
+	const max = 1 << 20 // 1 MiB safety cap
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, max))
+	return b
 }
-
-
