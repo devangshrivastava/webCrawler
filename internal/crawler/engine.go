@@ -4,11 +4,8 @@ package crawler
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net/url"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -46,28 +43,8 @@ func Run(opts Options) error {
 	// ----- Host politeness manager ------------------------------------------
 	hm := hostman.New(opts.UserAgent, opts.RequestsPerHost, opts.RobotsTimeout)
 
-	// ----- Strategy parsing (bfs | dfs | mixedN) -----------------------------
-	strat   := strings.ToLower(opts.Strategy)
-	mixPct  := 0 // 0 = pure BFS, 100 = pure DFS
-	switch {
-	case strat == "bfs":
-		mixPct = 0
-	case strat == "dfs":
-		mixPct = 100
-	case strings.HasPrefix(strat, "mixed"):
-		if n, err := strconv.Atoi(strat[5:]); err == nil {
-			if n < 0 {
-				n = 0
-			}
-			if n > 100 {
-				n = 100
-			}
-			mixPct = n
-		}
-	default:
-		fmt.Printf("unknown strategy %q, defaulting to bfs\n", strat)
-	}
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	// ---------- Strategy RNG ----------
+	rng := opts.prepare()
 
 	// ----- Worker pool channels ---------------------------------------------
 	jobs := make(chan string, opts.Workers*2)
@@ -84,13 +61,7 @@ func Run(opts Options) error {
 			}
 
 			// choose front/back according to strategy
-			var webURL string
-			var ok bool
-			if rng.Intn(100) < mixPct {      // DFS sample
-				webURL, ok = queue.PopBack()
-			} else {                         // BFS default
-				webURL, ok = queue.PopFront()
-			}
+			webURL, ok := opts.SelectURL(queue, rng)
 			if !ok {                         // frontier empty
 				time.Sleep(100 * time.Millisecond)
 				continue
