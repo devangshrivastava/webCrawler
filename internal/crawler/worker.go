@@ -45,8 +45,15 @@ func runWorker(
 			if len(body) == 0 {
 				continue
 			}
-
-			wp, links := parser.ParseHTML(u, body)
+			title, clean, wc := parser.Extract(body, 500)
+			_, links := parser.ParseHTML(u, body)
+			
+			wp := storage.Webpage{
+				URL:       u,
+				Title:     title,
+				Content:   clean,
+				WordCount: wc,
+			}
 			store.Insert(wp)
 
 			for _, l := range links {

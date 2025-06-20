@@ -1,7 +1,9 @@
 package storage
 
+
 type Webpage struct {
-	URL     string `bson:"url"`
-	Title   string `bson:"title"`
-	Content string `bson:"content"`
+	URL       string `bson:"url"`
+	Title     string `bson:"title"`
+	Content   string `bson:"content"`
+	WordCount int    `bson:"wordCount"`
 }
