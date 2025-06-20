@@ -8,11 +8,13 @@ import (
 	"os"
 	"sync"
 	"time"
-
 	"crawler-go/internal/frontier"
 	"crawler-go/internal/hostman"
 	"crawler-go/internal/storage"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"net/http"
+
 )
 
 // -----------------------------------------------------------------------------
@@ -50,6 +52,19 @@ func Run(opts Options) error {
 	jobs := make(chan string, opts.Workers*2)
 	wg   := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
+
+
+
+	// -----------------------------------------------------------------------
+	// METRICS SERVER  →  http://localhost:2112/metrics
+	// -----------------------------------------------------------------------
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		if err := http.ListenAndServe(":2112", nil); err != nil {
+			fmt.Println("metrics server:", err)
+		}
+	}()
+
 
 	// ----- Dispatcher --------------------------------------------------------
 	go func() {

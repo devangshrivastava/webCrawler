@@ -10,6 +10,7 @@ import (
 	"crawler-go/internal/frontier"
 	"crawler-go/internal/parser"
 	"crawler-go/internal/storage"
+	"crawler-go/internal/metrics"
 )
 
 // -----------------------------------------------------------------------------
@@ -80,5 +81,8 @@ func fetch(u string) []byte {
 
 	const max = 1 << 20 // 1 MiB safety cap
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, max))
+	metrics.BytesFetched.Add(float64(len(b)))
+	metrics.PagesFetched.Inc()
+
 	return b
 }
