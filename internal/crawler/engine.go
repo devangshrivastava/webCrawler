@@ -4,9 +4,7 @@ package crawler
 import (
 	"context"
 	"fmt"
-	"io"
 	"math/rand"
-	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -16,9 +14,7 @@ import (
 
 	"crawler-go/internal/frontier"
 	"crawler-go/internal/hostman"
-	"crawler-go/internal/parser"
 	"crawler-go/internal/storage"
-
 	"github.com/joho/godotenv"
 )
 
@@ -81,7 +77,6 @@ func Run(opts Options) error {
 	// ----- Dispatcher --------------------------------------------------------
 	go func() {
 		for {
-			// global stop?
 			if visited.Size() >= opts.MaxPages {
 				cancel()
 				close(jobs)
@@ -121,34 +116,7 @@ func Run(opts Options) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case u, ok := <-jobs:
-					if !ok {
-						return
-					}
-					if visited.Has(u) {
-						continue
-					}
-					visited.Add(u)
-
-					body := fetch(u)
-					if len(body) == 0 {
-						continue
-					}
-
-					wp, links := parser.ParseHTML(u, body)
-					store.Insert(wp)
-
-					for _, l := range links {
-						if !visited.Has(l) {
-							queue.Enqueue(l)
-						}
-					}
-				}
-			}
+			runWorker(ctx, jobs, visited, queue, store)
 		}()
 	}
 
@@ -171,21 +139,3 @@ func Run(opts Options) error {
 	return nil
 }
 
-// -----------------------------------------------------------------------------
-// HTTP fetch helper (shared client with timeout)
-// -----------------------------------------------------------------------------
-var httpClient = &http.Client{
-	Timeout: 15 * time.Second,
-}
-
-func fetch(u string) []byte {
-	resp, err := httpClient.Get(u)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	const max = 1 << 20 // 1 MiB safety cap
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, max))
-	return b
-}
