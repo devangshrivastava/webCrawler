@@ -18,6 +18,7 @@ type Options struct {
 	RobotsTimeout  time.Duration  // NEW
 	UserAgent      string         // NEW
 	mixPct        int            // NEW (0 = pure BFS, 100 = pure DFS)
+	Tokens         int            // NEW (max tokens to parse in HTML content)
 }
 
 func (o *Options) initStrategy() {

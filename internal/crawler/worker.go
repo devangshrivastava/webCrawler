@@ -27,6 +27,7 @@ func runWorker(
 	visited *frontier.Visited,
 	queue *frontier.Queue,
 	store *storage.Store,
+	tokenToParse int,
 ) {
 	for {
 		select {
@@ -46,8 +47,8 @@ func runWorker(
 			if len(body) == 0 {
 				continue
 			}
-			title, clean, wc := parser.Extract(body, 500)
-			_, links := parser.ParseHTML(u, body)
+			title, clean, wc := parser.Extract(body, tokenToParse)
+			_, links := parser.ParseHTML(u, body, tokenToParse)
 			
 			wp := storage.Webpage{
 				URL:       u,

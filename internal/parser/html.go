@@ -8,7 +8,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-func ParseHTML(currURL string, content []byte) (storage.Webpage, []string) {
+func ParseHTML(currURL string, content []byte, tokenToParse int) (storage.Webpage, []string) {
 	z := html.NewTokenizer(bytes.NewReader(content))
 	tokenCount := 0
 	bodyStarted := false
@@ -17,7 +17,7 @@ func ParseHTML(currURL string, content []byte) (storage.Webpage, []string) {
 	links := make([]string, 0)
 
 	for {
-		if z.Next() == html.ErrorToken || tokenCount > 500 {
+		if z.Next() == html.ErrorToken || tokenCount > tokenToParse {
 			break
 		}
 		t := z.Token()
@@ -38,7 +38,7 @@ func ParseHTML(currURL string, content []byte) (storage.Webpage, []string) {
 			}
 		}
 
-		if bodyStarted && t.Type == html.TextToken && textLen < 500 {
+		if bodyStarted && t.Type == html.TextToken && textLen < tokenToParse {
 			txt := strings.TrimSpace(t.Data)
 			wp.Content += txt
 			textLen += len(txt)

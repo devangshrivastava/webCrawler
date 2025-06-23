@@ -102,7 +102,7 @@ func Run(opts Options) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runWorker(ctx, jobs, visited, queue, store)
+			runWorker(ctx, jobs, visited, queue, store, opts.Tokens)
 		}()
 	}
 
